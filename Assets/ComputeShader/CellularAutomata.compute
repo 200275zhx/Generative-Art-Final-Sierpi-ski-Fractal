@@ -1,0 +1,87 @@
+// CellularAutomata.compute
+
+#pragma kernel CSMain
+
+// Define a RWTexture2D to output the simulation results directly.
+RWTexture2D<float4> ResultTexture;
+
+struct Cell
+{
+    float3 position; // Normalized position in the range [0, 1]
+    float velocity; // Not directly used for drawing
+    int colorIndex; // 0 for red, 1 for yellow, 2 for blue
+};
+
+RWStructuredBuffer<Cell> cellsBuffer; // Buffer to hold cell data
+
+// Constants for simulation
+int numCells;
+float deltaTime;
+float3 attractionForces[3]; // Attraction forces for each color
+float3 repulsionForces[3]; // Repulsion forces for each color
+float detectionRange;
+
+// List of colors (in RGBA)
+static const float4 colors[3] = { float4(1, 0, 0, 1), float4(1, 1, 0, 1), float4(0, 0, 1, 1) };
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.y * 256 + id.x; // Assuming a 256x256 texture, adjust if different
+    if (index >= numCells)
+        return;
+
+    Cell myCell = cellsBuffer[index];
+
+    // Simple movement and interaction logic (placeholder for your actual logic)
+    // Here you would include your logic for interaction between cells
+    // Compute forces from other cells
+    for (int i = 0; i < numCells; i++)
+    {
+        if (i == id.x)
+            continue;
+
+        Cell otherCell = cellsBuffer[i];
+        float3 direction = otherCell.position - myCell.position;
+        float distance = length(direction);
+
+        if (distance < detectionRange && distance > 0)
+        {
+            direction = normalize(direction);
+
+            // Implementing chase and evade behavior
+            int nextColor = (myCell.colorIndex + 1) % 3; // next in the cycle
+            int prevColor = (myCell.colorIndex + 2) % 3; // previous in the cycle
+
+            if (myCell.colorIndex == (otherCell.colorIndex + 1) % 3)
+            {
+                // Chase
+                myCell.velocity += direction * attractionForces[myCell.colorIndex] * deltaTime;
+            }
+            if ((myCell.colorIndex + 2) % 3 == otherCell.colorIndex)
+            {
+                // Evade
+                myCell.velocity -= direction * repulsionForces[myCell.colorIndex] * deltaTime;
+            }
+        }
+
+        // Check for catching
+        if (distance < detectionRange && myCell.colorIndex == (otherCell.colorIndex + 1) % 3)
+        {
+            otherCell.colorIndex = myCell.colorIndex; // Change color to the catcher's color
+            // Emit a repulsive force to surrounding cells, not implemented in detail here
+        }
+
+        // Update the other cell in case of catching
+        cellsBuffer[i] = otherCell;
+    }
+
+    // Update position and limit velocity for stability
+    myCell.velocity = clamp(myCell.velocity, -100.0, 100.0);
+    myCell.position += myCell.velocity * deltaTime;
+    cellsBuffer[id.x] = myCell;
+    
+    // Update the texture based on the cell's current state
+    uint2 coord = uint2(myCell.position.xy * 256); // Scale position to texture size
+    ResultTexture[coord] = colors[myCell.colorIndex]; // Set the pixel color
+}
